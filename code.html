@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recruitment Intelligence — Code</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="mark">
+      <svg viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="1" y="1" width="28" height="28" rx="6" stroke="#a6701f" stroke-width="1.4"/>
+        <circle cx="15" cy="15" r="5.5" stroke="#a6701f" stroke-width="1.4"/>
+        <line x1="15" y1="1" x2="15" y2="9.5" stroke="#a6701f" stroke-width="1.4"/>
+        <line x1="15" y1="20.5" x2="15" y2="29" stroke="#a6701f" stroke-width="1.4"/>
+      </svg>
+    </div>
+    <div class="name">Recruitment Intelligence <span>/ scouting analytics</span></div>
+  </div>
+  <nav>
+    <a href="index.html">Shortlists</a>
+    <a href="players.html">Players</a>
+    <a href="analytics.html">Analytics</a>
+    <a href="benchmark.html">Benchmark</a>
+    <a href="code.html" class="active">Code</a>
+  </nav>
+</header>
+
+<main class="no-sidebar">
+  <p class="page-title">Pipeline code</p>
+  <div class="code-wrap">
+    <p class="code-intro">The six scripts behind this dashboard, in build order: event-data metrics, statistical adjustments, tracking-derived spatial metrics, player similarity, the scouting app itself, and the dossier generator.</p>
+
+    <div class="tabs">
+      <button class="tab active" data-panel="metrics">metrics.py</button>
+      <button class="tab" data-panel="adjustments">adjustments.py</button>
+      <button class="tab" data-panel="tracking">tracking.py</button>
+      <button class="tab" data-panel="similarity">similarity.py</button>
+      <button class="tab" data-panel="app">scouting_app.py</button>
+      <button class="tab" data-panel="dossier">dossier.py</button>
+    </div>
+
+    <div class="code-panels">
+      <div class="code-panel active" id="panel-metrics">
+        <div class="file-row"><span class="file-name">src/metrics.py</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre><code class="language-python">import pandas as pd
+
+def per_90(df: pd.DataFrame, minutes_col="minutes_played") -> pd.DataFrame:
+    metric_cols = [c for c in df.columns if c.startswith("total_")]
+    for c in metric_cols:
+        df[c.replace("total_", "") + "_p90"] = df[c] / (df[minutes_col] / 90)
+    return df
+
+def progressive_actions(events: pd.DataFrame) -> pd.DataFrame:
+    """Flag progressive passes/carries: advance the ball >=10m toward goal
+    (or into the final third), excluding backwards/lateral actions."""
+    def is_progressive(row):
+        if pd.isna(row.get("pass_end_location")) and pd.isna(row.get("carry_end_location")):
+            return False
+        start_x = row["location"][0]
+        end = row.get("pass_end_location") or row.get("carry_end_location")
+        end_x = end[0] if isinstance(end, list) else start_x
+        return (end_x - start_x) >= 10 and end_x > 60  # pitch is 120 long
+
+    events["is_progressive"] = events.apply(is_progressive, axis=1)
+    return events
+
+def build_player_season_table(events: pd.DataFrame, minutes: pd.DataFrame) -> pd.DataFrame:
+    """Aggregate to one row per player-season, then normalize by minutes,
+    team possession share, and competition (z-scores within competition)."""
+    agg = events.groupby(["player", "team", "position"]).agg(
+        total_passes=("type", lambda x: (x == "Pass").sum()),
+        total_progressive=("is_progressive", "sum"),
+        total_shots=("type", lambda x: (x == "Shot").sum()),
+        total_pressures=("type", lambda x: (x == "Pressure").sum()),
+    ).reset_index()
+    table = agg.merge(minutes, on="player")
+    table = per_90(table)
+    return table
+
+def zscore_within_group(df: pd.DataFrame, value_cols: list[str], group_col: str) -> pd.DataFrame:
+    for col in value_cols:
+        df[col + "_z"] = df.groupby(group_col)[col].transform(
+            lambda x: (x - x.mean()) / x.std(ddof=0)
+        )
+    return df</code></pre>
+      </div>
+
+      <div class="code-panel" id="panel-adjustments">
+        <div class="file-row"><span class="file-name">src/adjustments.py</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre><code class="language-python">import pandas as pd
+import numpy as np
+
+# Illustrative only — a real deployment calibrates these from cross-league
+# transfer outcomes or a licensed strength index, not hand-set values.
+# 1.0 is pegged to an arbitrary top-5-league benchmark.
+LEAGUE_STRENGTH = {
+    "Liga Portugal 2":       0.68,
+    "Austrian Bundesliga":   0.71,
+    "Indian Super League":   0.52,
+    "NCAA Division I":       0.40,
+    "Ligue 2":               0.74,
+}
+
+def adjust_for_possession(df: pd.DataFrame, metric_col: str,
+                           possession_col: str = "team_possession_pct",
+                           baseline: float = 50.0) -> pd.DataFrame:
+    """Rescale a possession-dependent metric (progressive passes, pressures,
+    touches) to what it would look like at league-average possession share.
+
+    Why: a progressive-pass count racked up for a team that holds the ball
+    65% of the time reflects more total opportunities than the same count
+    for a team stuck at 35%. Comparing raw per-90 rates across those two
+    contexts silently favors players on dominant teams. Dividing by the
+    team's actual possession share and rescaling to a 50% baseline puts
+    every player on a comparable opportunity footing."""
+    factor = baseline / df[possession_col]
+    df[metric_col + "_padj"] = df[metric_col] * factor
+    return df
+
+def shrink_to_positional_mean(df: pd.DataFrame, metric_col: str,
+                               position_col: str = "position",
+                               sample_col: str = "minutes_played",
+                               k: float = 600) -> pd.DataFrame:
+    """Empirical Bayes shrinkage: pull small-sample rates toward the
+    positional mean, in proportion to how little data backs them.
+
+    Why: a player with 900 minutes and a per-90 rate built on 14 events is
+    mostly noise at the tails — one hot game inflates it. `k` is the
+    'prior strength' in minutes: treat the positional mean as if it were
+    itself backed by k minutes of evidence. A player with `n` minutes gets
+    weighted `n` parts observed rate to `k` parts prior. At n=900, k=600 the
+    observed rate is trusted at ~60% strength; at n=3000 it's trusted at
+    ~83% strength. This is what should sit behind any 'data confidence'
+    label — right now that label is asserted, not computed. This function
+    is what would compute it."""
+    pos_means = df.groupby(position_col)[metric_col].transform("mean")
+    n = df[sample_col]
+    df[metric_col + "_shrunk"] = (n * df[metric_col] + k * pos_means) / (n + k)
+    df[metric_col + "_confidence"] = n / (n + k)  # 0-1, feed this to the UI instead of "High"/"Medium"
+    return df
+
+def apply_league_strength(df: pd.DataFrame, metric_col: str,
+                           league_col: str = "competition") -> pd.DataFrame:
+    """Scale a metric by a league-strength coefficient before ranking
+    players across competitions.
+
+    Why: a 93rd percentile in a weaker league and a 93rd percentile in a
+    stronger one are not the same claim about ability. Without this step,
+    the shortlist's percentile column implicitly treats all leagues as
+    equally hard, which is the single easiest thing for a scout to
+    correctly call out and discredit the whole model over."""
+    strength = df[league_col].map(LEAGUE_STRENGTH).fillna(0.5)
+    df[metric_col + "_lgadj"] = df[metric_col] * strength
+    return df
+
+def build_adjusted_percentile(df: pd.DataFrame, raw_col: str,
+                               position_col: str = "position",
+                               possession_col: str = "team_possession_pct",
+                               league_col: str = "competition",
+                               sample_col: str = "minutes_played") -> pd.DataFrame:
+    """Full pipeline: possession-adjust -> shrink toward positional mean
+    -> league-strength scale -> percentile rank within position group.
+
+    This is the number that should reach a scout's screen — not the raw
+    per-90 the earlier metrics.py produces. Keep both columns; the raw
+    version is useful for debugging when the adjusted number looks wrong."""
+    df = adjust_for_possession(df, raw_col, possession_col)
+    padj_col = raw_col + "_padj"
+    df = shrink_to_positional_mean(df, padj_col, position_col, sample_col)
+    shrunk_col = padj_col + "_shrunk"
+    df = apply_league_strength(df, shrunk_col, league_col)
+    final_col = shrunk_col + "_lgadj"
+    df[raw_col + "_percentile"] = df.groupby(position_col)[final_col].rank(pct=True) * 100
+    return df</code></pre>
+      </div>
+
+      <div class="code-panel" id="panel-tracking">
+        <div class="file-row"><span class="file-name">src/tracking.py</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre><code class="language-python">import numpy as np
+from scipy.spatial import ConvexHull
+
+def team_compactness(frame: dict) -> float:
+    """frame = {'player_id': (x, y), ...} for one team at one timestamp.
+    Compactness = area of convex hull of outfield players (smaller = more compact)."""
+    points = np.array(list(frame.values()))
+    if len(points) < 3:
+        return np.nan
+    hull = ConvexHull(points)
+    return hull.volume  # 'volume' is area in 2D
+
+def defensive_line_height(frame: dict, gk_id=None) -> float:
+    """Average x-position of the back line (excluding GK)."""
+    xs = [pos[0] for pid, pos in frame.items() if pid != gk_id]
+    xs_sorted = sorted(xs)
+    back_four = xs_sorted[:4]
+    return np.mean(back_four)
+
+def space_creation_score(player_pos, teammate_positions, opponent_positions, radius=5.0):
+    """Off-ball space creation: how much open space (no opponent within `radius`)
+    a player occupies, weighted by proximity to the ball-progression zone."""
+    distances_to_opponents = [np.linalg.norm(np.array(player_pos) - np.array(op))
+                               for op in opponent_positions]
+    nearest_opponent_dist = min(distances_to_opponents) if distances_to_opponents else radius
+    return min(nearest_opponent_dist, radius) / radius  # 0 = marked tight, 1 = fully free
+
+def build_voronoi_control(all_positions, teams):
+    """Feed positions + team labels straight into scipy.spatial.Voronoi
+    to get each player's controlled pitch area for the pitch-control diagram."""
+    from scipy.spatial import Voronoi
+    bound = np.array([[-1000, -1000], [-1000, 1000], [1000, -1000], [1000, 1000]])
+    vor = Voronoi(np.vstack([all_positions, bound]))
+    return vor</code></pre>
+      </div>
+
+      <div class="code-panel" id="panel-similarity">
+        <div class="file-row"><span class="file-name">src/similarity.py</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre><code class="language-python">from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
+from sklearn.metrics.pairwise import cosine_similarity
+import pandas as pd
+
+def build_similarity_matrix(player_table: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
+    scaler = StandardScaler()
+    X = scaler.fit_transform(player_table[feature_cols])
+    sim = cosine_similarity(X)
+    return pd.DataFrame(sim, index=player_table["player"], columns=player_table["player"])
+
+def most_similar(player_name: str, sim_matrix: pd.DataFrame, n=5) -> pd.Series:
+    return sim_matrix[player_name].sort_values(ascending=False).iloc[1:n+1]
+
+def reduce_to_2d(player_table: pd.DataFrame, feature_cols: list[str]) -> pd.DataFrame:
+    scaler = StandardScaler()
+    X = scaler.fit_transform(player_table[feature_cols])
+    coords = PCA(n_components=2).fit_transform(X)
+    out = player_table.copy()
+    out["pc1"], out["pc2"] = coords[:, 0], coords[:, 1]
+    return out
+
+def fit_age_curve(df: pd.DataFrame, metric_col: str):
+    """Quadratic age curve with an 80% prediction interval, for the
+    'quantify uncertainty around long-term potential' research angle."""
+    import statsmodels.api as sm
+    import numpy as np
+    X = sm.add_constant(np.column_stack([df["age"], df["age"]**2]))
+    model = sm.OLS(df[metric_col], X).fit()
+    pred = model.get_prediction(X)
+    summary = pred.summary_frame(alpha=0.20)
+    return model, summary</code></pre>
+      </div>
+
+      <div class="code-panel" id="panel-app">
+        <div class="file-row"><span class="file-name">app/scouting_app.py</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre><code class="language-python">import streamlit as st
+import pandas as pd
+from src.metrics import build_player_season_table
+from src.similarity import build_similarity_matrix, most_similar
+
+st.set_page_config(page_title="Scouting Platform", layout="wide")
+st.title("Player Recruitment Shortlisting Tool")
+
+df = pd.read_parquet("data/processed/player_season_table.parquet")
+
+with st.sidebar:
+    st.header("Define the role")
+    position = st.selectbox("Position", sorted(df["position"].unique()))
+    age_range = st.slider("Age range", 16, 35, (18, 23))
+    min_minutes = st.number_input("Minimum minutes played", value=900)
+
+filtered = df[
+    (df["position"] == position)
+    & (df["age"].between(*age_range))
+    & (df["minutes_played"] >= min_minutes)
+]
+
+st.subheader(f"{len(filtered)} candidates match this profile")
+st.dataframe(filtered[["player", "team", "age", "progressive_p90", "shots_p90"]])
+
+selected = st.selectbox("Inspect a player", filtered["player"].unique())
+player_row = filtered[filtered["player"] == selected].iloc[0]
+
+col1, col2 = st.columns(2)
+with col1:
+    st.markdown(f"### {selected}")
+    is_priority = player_row["progressive_p90_z"] > 1
+    st.write(f"**Recommendation:** {'High-priority scouting' if is_priority else 'Monitor'}")
+
+with col2:
+    sim_matrix = build_similarity_matrix(df, ["progressive_p90", "shots_p90", "pressures_p90"])
+    similar = most_similar(selected, sim_matrix)
+    st.write("**Most similar players:**")
+    st.bar_chart(similar)</code></pre>
+      </div>
+
+      <div class="code-panel" id="panel-dossier">
+        <div class="file-row"><span class="file-name">src/dossier.py</span><button class="copy-btn" onclick="copyCode(this)">Copy</button></div>
+        <pre><code class="language-python">def generate_dossier(player_row, strengths, concerns, context_notes, similar_players) -> str:
+    is_priority = player_row["progressive_p90_z"] > 1
+    is_confident = player_row["minutes_played"] > 1800
+
+    return f"""
+# {player_row['player']}
+**Role:** {player_row['position']}  |  **Age:** {player_row['age']}
+
+## Recommendation
+{"High-priority scouting" if is_priority else "Monitor"}
+
+## Strengths
+{chr(10).join(f"- {s}" for s in strengths)}
+
+## Concerns
+{chr(10).join(f"- {c}" for c in concerns)}
+
+## Context
+{context_notes}
+
+## Similar players
+{chr(10).join(f"- {p}" for p in similar_players)}
+
+## Data confidence
+{"High" if is_confident else "Medium — limited sample"}
+"""</code></pre>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<footer>
+  <span>Sample data for demonstration &middot; built on open StatsBomb and Metrica Sports tracking data</span>
+  <span>Updated today</span>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script>
+<script>
+try {
+  document.querySelectorAll('.code-panel code').forEach(el => hljs.highlightElement(el));
+} catch (e) { console.warn('highlight.js unavailable, showing plain code', e); }
+
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.code-panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById('panel-' + tab.dataset.panel).classList.add('active');
+  });
+});
+
+function copyCode(btn){
+  const pre = btn.closest('.code-panel').querySelector('pre code');
+  navigator.clipboard.writeText(pre.textContent).then(() => {
+    const original = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = original; }, 1500);
+  });
+}
+</script>
+
+</body>
+</html>

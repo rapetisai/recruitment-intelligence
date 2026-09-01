@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Recruitment Intelligence — Benchmark</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600&family=Inter:wght@400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <div class="mark">
+      <svg viewBox="0 0 30 30" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <rect x="1" y="1" width="28" height="28" rx="6" stroke="#a6701f" stroke-width="1.4"/>
+        <circle cx="15" cy="15" r="5.5" stroke="#a6701f" stroke-width="1.4"/>
+        <line x1="15" y1="1" x2="15" y2="9.5" stroke="#a6701f" stroke-width="1.4"/>
+        <line x1="15" y1="20.5" x2="15" y2="29" stroke="#a6701f" stroke-width="1.4"/>
+      </svg>
+    </div>
+    <div class="name">Recruitment Intelligence <span>/ scouting analytics</span></div>
+  </div>
+  <nav>
+    <a href="index.html">Shortlists</a>
+    <a href="players.html">Players</a>
+    <a href="analytics.html">Analytics</a>
+    <a href="benchmark.html" class="active">Benchmark</a>
+    <a href="code.html">Code</a>
+  </nav>
+</header>
+
+<main class="no-sidebar">
+  <p class="page-title">Real season benchmark &middot; 2021&ndash;22 ISL</p>
+  <div class="intro-block">
+    <p>A verified historical reference, not model output: standard box-score stats for Hyderabad FC's title-winning 2021&ndash;22 campaign, used to sanity-check what a genuine standout season looks like against the sample shortlist. Deliberately limited to appearances, goals, and assists &mdash; the only figures independently confirmed across sources &mdash; rather than the advanced per-90 metrics used elsewhere, since event-level data isn't publicly available for this league and season.</p>
+  </div>
+
+  <div class="bottom-grid" style="margin-bottom:16px;">
+    <div class="similarity-card">
+      <h3 style="font-size:14px; margin:0 0 2px;">Goals scored, 2021&ndash;22 season</h3>
+      <p style="font-size:12px; color:var(--text-2); margin:0;">Hyderabad FC, all competitions</p>
+      <div class="imgwrap" style="background:none; position:relative; height:220px; margin-top:14px;">
+        <canvas id="realGoalsChart" role="img" aria-label="Bar chart: Bartholomew Ogbeche 18 goals in 20 appearances, Javier Siverio 7 goals in 23 appearances, Joel Chianese 7 goals in 31 appearances">Ogbeche scored 18 goals in 20 appearances to win the league Golden Boot. Siverio scored 7 goals in 23 appearances. Chianese scored 7 goals in 31 appearances across all competitions.</canvas>
+      </div>
+    </div>
+    <div class="dossier">
+      <div class="dossier-head">
+        <h3 style="font-size:16px;">Hyderabad FC &middot; champions</h3>
+        <span class="rec">2021&ndash;22 ISL title</span>
+      </div>
+      <p class="dossier-sub">Standard stats only &mdash; appearances, goals, assists</p>
+      <table style="margin-bottom:0;">
+        <thead>
+          <tr><th>Player</th><th>Role</th><th style="text-align:right;">Apps</th><th style="text-align:right;">Goals</th><th style="text-align:right;">Assists</th><th style="text-align:right;">Goals/app</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Bartholomew Ogbeche</td><td>Forward (Nigeria)</td><td class="num">20</td><td class="num">18</td><td class="num">1</td><td class="num">0.90</td></tr>
+          <tr><td>Javier Siverio</td><td>Forward (Spain)</td><td class="num">23</td><td class="num">7</td><td class="num">&mdash;</td><td class="num">0.30</td></tr>
+          <tr><td>Joel Chianese</td><td>Forward (Australia)</td><td class="num">31</td><td class="num">7</td><td class="num">3</td><td class="num">0.23</td></tr>
+          <tr><td>Juanan</td><td>Centre-back (Spain)</td><td class="num">&mdash;</td><td class="num">0</td><td class="num">3</td><td class="num">&mdash;</td></tr>
+        </tbody>
+      </table>
+      <div class="dossier-note" style="margin-top:14px;">
+        Ogbeche's 18 goals in 20 appearances won him the league Golden Boot at essentially a goal per game. Juanan and Chianese tied for the club's assist lead with three apiece &mdash; notable for Juanan specifically, since he played centre-back. Chianese and Siverio's goal counts aren't directly comparable on this row: Siverio's 7 came in league play alone, while Chianese's 7 are an all-competition total (league, Durand Cup, and playoffs combined) &mdash; the season squad record doesn't break that figure down further.
+      </div>
+      <p style="font-size:11.5px; color:var(--text-3); margin-top:10px; margin-bottom:0;">
+        Juanan's exact 2021&ndash;22 appearance count wasn't independently confirmable across available sources at time of writing; shown as unconfirmed rather than estimated. Sources: Wikipedia (2021&ndash;22 Hyderabad FC season squad statistics), Indian Super League official site.
+      </p>
+    </div>
+  </div>
+
+  <p style="font-size:12px; color:var(--text-3);">See <a href="players.html" style="color:var(--amber); text-decoration:underline;">Players</a> for background on each of these four.</p>
+</main>
+
+<footer>
+  <span>Sample data for demonstration &middot; built on open StatsBomb and Metrica Sports tracking data</span>
+  <span>Updated today</span>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script>
+try {
+  new Chart(document.getElementById('realGoalsChart'), {
+    type: 'bar',
+    data: {
+      labels: ['Ogbeche', 'Siverio', 'Chianese'],
+      datasets: [{
+        label: 'Goals, 2021–22 season',
+        data: [18, 7, 7],
+        backgroundColor: ['#a6701f', '#1f7a52', '#5c7fa6'],
+        borderRadius: 4
+      }]
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        y: { beginAtZero: true, ticks: { color: '#5c615e' }, grid: { color: 'rgba(20,22,20,0.08)' } },
+        x: { ticks: { color: '#191b19' }, grid: { display: false } }
+      }
+    }
+  });
+} catch (e) { console.warn('Chart.js unavailable, skipping goals chart', e); }
+</script>
+
+</body>
+</html>
